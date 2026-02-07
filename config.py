@@ -1,11 +1,26 @@
-# config.py
+# config.py - ИСПРАВЛЕННЫЙ
 import os
-from dotenv import load_dotenv
 
-load_dotenv()
+# НЕ ИСПОЛЬЗУЕМ dotenv на Render.com
+# переменные окружения устанавливаются в панели Render
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-TIMEZONE = os.getenv("TIMEZONE", "Europe/Moscow")
-ADMINS = [int(x) for x in os.getenv("ADMINS", "").split(",") if x.strip()]
+
+# Разделяем ADMINS по запятым
+admins_str = os.getenv("ADMINS", "")
+ADMINS = [int(x) for x in admins_str.split(",") if x.strip()]
+
 TIME_SLOT_MINUTES = 60
 ENABLE_ADMIN_NOTIFICATIONS = True
+
+# Проверка при запуске
+if __name__ == "__main__":
+    if not BOT_TOKEN:
+        print("❌ ОШИБКА: BOT_TOKEN не установлен!")
+    else:
+        print(f"✅ BOT_TOKEN: {'***' + BOT_TOKEN[-5:] if BOT_TOKEN else 'Нет'}")
+    
+    if not ADMINS:
+        print("⚠️  ПРЕДУПРЕЖДЕНИЕ: ADMINS не установлены")
+    else:
+        print(f"✅ ADMINS: {ADMINS}")
