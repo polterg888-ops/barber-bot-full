@@ -1,9 +1,8 @@
-# main.py - ДЛЯ ВЕРСИИ 20.7
+# main.py - ДЛЯ ВЕРСИИ 13.15
 import sys
 import os
-import logging
 
-# Фиксы для модулей
+# ========== ФИКСЫ ДЛЯ МОДУЛЕЙ ==========
 class MockImghdr:
     @staticmethod
     def what(file, h=None):
@@ -17,64 +16,116 @@ class FakeDotenv:
 sys.modules['imghdr'] = MockImghdr()
 sys.modules['dotenv'] = FakeDotenv()
 
+# ========== ОСНОВНОЙ КОД ==========
+import logging
+
+# Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
 )
 logger = logging.getLogger(__name__)
 
-async def error_handler(update, context):
-    logger.error(f"Ошибка: {context.error}", exc_info=True)
-
 def main():
+    """Основная функция запуска"""
     try:
         print("=" * 60)
         print("🚀 ТЕЛЕГРАМ БОТ ДЛЯ БАРБЕРШОПА")
-        print("Версия: 20.7")
+        print("Версия: 13.15 (стабильная)")
         print("=" * 60)
         
-        # Импортируем config
-        from config import BOT_TOKEN, ADMINS
-        logger.info(f"✅ Токен: {'установлен' if BOT_TOKEN else 'НЕТ!'}")
-        
-        if not BOT_TOKEN:
-            logger.error("❌ BOT_TOKEN не установлен!")
+        # 1. ЗАГРУЗКА КОНФИГУРАЦИИ
+        logger.info("📋 Загружаем конфигурацию...")
+        try:
+            # Импортируем config
+            from config import BOT_TOKEN, ADMINS
+            
+            logger.info(f"✅ Токен: {'установлен' if BOT_TOKEN else 'НЕТ!'}")
+            logger.info(f"✅ Админы: {ADMINS}")
+            
+            if not BOT_TOKEN:
+                logger.error("❌ ОШИБКА: BOT_TOKEN не установлен!")
+                return
+                
+        except ImportError as e:
+            logger.error(f"❌ Ошибка загрузки config.py: {e}")
             return
         
-        # Инициализация базы
-        from database import init_db
-        init_db()
-        logger.info("✅ База данных инициализирована")
+        # 2. ИНИЦИАЛИЗАЦИЯ БАЗЫ ДАННЫХ
+        logger.info("🗄️ Инициализируем базу данных...")
+        try:
+            from database import init_db
+            init_db()
+            logger.info("✅ База данных инициализирована")
+        except Exception as e:
+            logger.error(f"❌ Ошибка базы данных: {e}")
+            return
         
-        # Создаем Application (версия 20.7)
-        from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
+        # 3. СОЗДАНИЕ UPDATER (версия 13.15)
+        logger.info("🤖 Создаем Telegram бота...")
+        try:
+            # Импорт для версии 13.15
+            from telegram import Updater
+            from telegram.ext import CommandHandler, CallbackQueryHandler, MessageHandler, Filters
+            
+            # Создаем Updater (версия 13.15)
+            updater = Updater(token=BOT_TOKEN, use_context=True)
+            dp = updater.dispatcher
+            
+            logger.info("✅ Updater создан")
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка создания Updater: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return
         
-        application = Application.builder().token(BOT_TOKEN).build()
+        # 4. ЗАГРУЗКА ОБРАБОТЧИКОВ
+        logger.info("🔄 Загружаем обработчики...")
+        try:
+            # Импортируем обработчики
+            from bot.handlers import start, admin_command, contact_handler, button_handler, text_handler
+            
+            # Добавляем обработчики (версия 13.15)
+            dp.add_handler(CommandHandler("start", start))
+            dp.add_handler(CommandHandler("admin", admin_command))
+            dp.add_handler(MessageHandler(Filters.contact, contact_handler))
+            dp.add_handler(MessageHandler(Filters.text & Filters.private, text_handler))
+            dp.add_handler(CallbackQueryHandler(button_handler))
+            
+            logger.info("✅ Все обработчики добавлены")
+            
+        except ImportError as e:
+            logger.error(f"❌ Ошибка импорта обработчиков: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return
         
-        # Обработчик ошибок
-        application.add_error_handler(error_handler)
+        # 5. ЗАПУСК БОТА
+        logger.info("=" * 60)
+        logger.info("🤖 БОТ ЗАПУЩЕН СО ВСЕМИ ФУНКЦИЯМИ:")
+        logger.info("✅ Запись на услуги")
+        logger.info("✅ Календарь записей")
+        logger.info("✅ Управление услугами")
+        logger.info("✅ Уведомления админам")
+        logger.info("✅ Закрытие/открытие времени")
+        logger.info("=" * 60)
         
-        # Импортируем обработчики
-        from bot.handlers import start, admin_command, contact_handler, button_handler, text_handler
+        # Запускаем polling (версия 13.15)
+        logger.info("▶️ Запускаем polling...")
+        updater.start_polling()
         
-        # Регистрируем обработчики (версия 20.7)
-        application.add_handler(CommandHandler("start", start))
-        application.add_handler(CommandHandler("admin", admin_command))
-        application.add_handler(MessageHandler(filters.CONTACT, contact_handler))
-        application.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE, text_handler))
-        application.add_handler(CallbackQueryHandler(button_handler))
+        logger.info("✅ Бот запущен и работает!")
+        logger.info("⏳ Ожидаем сообщений...")
         
-        logger.info("✅ Все обработчики добавлены")
-        
-        # Запускаем бота
-        logger.info("🤖 Запускаем бота...")
-        application.run_polling(
-            allowed_updates=None,
-            drop_pending_updates=True
-        )
+        # Блокируем выполнение (версия 13.15)
+        updater.idle()
         
     except Exception as e:
-        logger.error(f"💥 Критическая ошибка: {e}", exc_info=True)
+        logger.error(f"💥 КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
+        import traceback
+        logger.error(traceback.format_exc())
         sys.exit(1)
 
 if __name__ == '__main__':
