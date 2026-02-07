@@ -65,7 +65,7 @@ def main():
         logger.info("✅ База данных инициализирована")
         
         # 4. Импортируем обработчики
-        from bot.handlers import start, admin_command, contact_handler, button_handler, text_handler, set_application
+        from bot.handlers import start, admin_command, contact_handler, button_handler, text_handler
         
         if VERSION_13:
             # ========== ВЕРСИЯ 13.15 ==========
