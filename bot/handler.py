@@ -1,6 +1,5 @@
-# bot/handlers.py - ПОЛНЫЙ ИСПРАВЛЕННЫЙ ФАЙЛ ДЛЯ ВЕРСИИ 20.7+
+# bot/handlers.py - ПОЛНЫЙ ИСПРАВЛЕННЫЙ ФАЙЛ
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import ContextTypes
 from telegram.error import BadRequest
 from database import (
     save_user, get_user, get_services, add_service, delete_service,
@@ -18,16 +17,32 @@ from datetime import datetime, timedelta
 import sqlite3
 from contextlib import closing
 
-# Глобальная переменная для уведомлений
-application = None
+# Импорт ContextTypes в зависимости от версии
+try:
+    # Для версии 20.7+
+    from telegram.ext import ContextTypes
+    CONTEXT_TYPE = ContextTypes.DEFAULT_TYPE
+except ImportError:
+    # Для версии 13.15
+    try:
+        from telegram.ext import CallbackContext
+        CONTEXT_TYPE = CallbackContext
+    except ImportError:
+        # Фолбэк
+        CONTEXT_TYPE = object
 
-def set_application(app):
-    global application
-    application = app
+# Глобальная переменная для бота
+bot_instance = None
+
+def set_bot(bot):
+    """Устанавливаем объект бота для уведомлений"""
+    global bot_instance
+    bot_instance = bot
+    print(f"✅ Бот установлен: {type(bot).__name__}")
 
 async def notify_admins_about_booking(booking_details, user_info):
     """Отправляет уведомление всем админам о новой записи"""
-    if not ENABLE_ADMIN_NOTIFICATIONS or not application:
+    if not ENABLE_ADMIN_NOTIFICATIONS or not bot_instance:
         return
     
     service, date, time, price = booking_details
@@ -45,7 +60,7 @@ async def notify_admins_about_booking(booking_details, user_info):
     
     for admin_id in ADMINS:
         try:
-            await application.bot.send_message(
+            await bot_instance.send_message(
                 chat_id=admin_id,
                 text=message,
                 parse_mode='Markdown'
@@ -55,7 +70,7 @@ async def notify_admins_about_booking(booking_details, user_info):
 
 async def notify_admins_about_cancellation(booking_details, user_info, cancelled_by_admin=False):
     """Отправляет уведомление всем админам об отмене записи"""
-    if not ENABLE_ADMIN_NOTIFICATIONS or not application:
+    if not ENABLE_ADMIN_NOTIFICATIONS or not bot_instance:
         return
     
     service, date, time, price = booking_details
@@ -75,7 +90,7 @@ async def notify_admins_about_cancellation(booking_details, user_info, cancelled
     
     for admin_id in ADMINS:
         try:
-            await application.bot.send_message(
+            await bot_instance.send_message(
                 chat_id=admin_id,
                 text=message,
                 parse_mode='Markdown'
@@ -180,7 +195,7 @@ def get_available_times(date_str, duration_minutes):
     return available
 
 # ОСНОВНЫЕ ОБРАБОТЧИКИ
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(update: Update, context: CONTEXT_TYPE):
     user = update.effective_user
     
     if user.id in ADMINS:
@@ -206,7 +221,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=keyboard
         )
 
-async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def contact_handler(update: Update, context: CONTEXT_TYPE):
     contact = update.message.contact
     user = update.effective_user
     
@@ -235,7 +250,7 @@ async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     await update.message.reply_text(message, reply_markup=menu)
 
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def button_handler(update: Update, context: CONTEXT_TYPE):
     query = update.callback_query
     await query.answer()
     data = query.data
@@ -780,7 +795,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             menu = user_main_menu()
         await safe_edit_message(query, "Неизвестная команда.", menu)
 
-async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def admin_command(update: Update, context: CONTEXT_TYPE):
     if update.effective_user.id not in ADMINS:
         await update.message.reply_text("🚫 Доступ запрещён.")
         return
@@ -788,7 +803,7 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from bot.admin_keyboards import admin_main_menu
     await update.message.reply_text("🛠 Админ-панель:", reply_markup=admin_main_menu())
 
-async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def text_handler(update: Update, context: CONTEXT_TYPE):
     user_id = update.effective_user.id
     if user_id not in ADMINS:
         return
