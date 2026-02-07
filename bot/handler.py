@@ -1,6 +1,6 @@
-# bot/handlers.py - ПОЛНЫЙ ФАЙЛ ДЛЯ ВЕРСИИ 13.15
+# bot/handlers.py - ПОЛНЫЙ ИСПРАВЛЕННЫЙ ФАЙЛ ДЛЯ ВЕРСИИ 20.7+
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import CallbackContext
+from telegram.ext import ContextTypes
 from telegram.error import BadRequest
 from database import (
     save_user, get_user, get_services, add_service, delete_service,
@@ -19,10 +19,71 @@ import sqlite3
 from contextlib import closing
 
 # Глобальная переменная для уведомлений
-bot_instance = None
+application = None
+
+def set_application(app):
+    global application
+    application = app
+
+async def notify_admins_about_booking(booking_details, user_info):
+    """Отправляет уведомление всем админам о новой записи"""
+    if not ENABLE_ADMIN_NOTIFICATIONS or not application:
+        return
+    
+    service, date, time, price = booking_details
+    full_name, phone = user_info
+    
+    message = (
+        "📢 *НОВАЯ ЗАПИСЬ*\n"
+        f"👤 Клиент: {full_name}\n"
+        f"📞 Телефон: {phone}\n"
+        f"💅 Услуга: {service}\n"
+        f"📅 Дата: {date}\n"
+        f"⏰ Время: {time}\n"
+        f"💰 Стоимость: {price}₽"
+    )
+    
+    for admin_id in ADMINS:
+        try:
+            await application.bot.send_message(
+                chat_id=admin_id,
+                text=message,
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            print(f"Не удалось отправить уведомление админу {admin_id}: {e}")
+
+async def notify_admins_about_cancellation(booking_details, user_info, cancelled_by_admin=False):
+    """Отправляет уведомление всем админам об отмене записи"""
+    if not ENABLE_ADMIN_NOTIFICATIONS or not application:
+        return
+    
+    service, date, time, price = booking_details
+    full_name, phone = user_info
+    
+    cancelled_by = "клиентом" if not cancelled_by_admin else "администратором"
+    
+    message = (
+        f"❌ *ОТМЕНА ЗАПИСИ* ({cancelled_by})\n"
+        f"👤 Клиент: {full_name}\n"
+        f"📞 Телефон: {phone}\n"
+        f"💅 Услуга: {service}\n"
+        f"📅 Дата: {date}\n"
+        f"⏰ Время: {time}\n"
+        f"💰 Стоимость: {price}₽"
+    )
+    
+    for admin_id in ADMINS:
+        try:
+            await application.bot.send_message(
+                chat_id=admin_id,
+                text=message,
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            print(f"Не удалось отправить уведомление об отмене админу {admin_id}: {e}")
 
 def safe_edit_message(query, text, reply_markup=None, parse_mode=None):
-    """Безопасное редактирование сообщения"""
     try:
         current_text = query.message.text or query.message.caption
         
@@ -44,7 +105,6 @@ def safe_edit_message(query, text, reply_markup=None, parse_mode=None):
             raise
 
 def parse_time(time_str):
-    """Парсинг времени"""
     if ':' not in time_str:
         time_str += ":00"
     h, m = time_str.split(':')
@@ -119,16 +179,14 @@ def get_available_times(date_str, duration_minutes):
     
     return available
 
-# ============ ОСНОВНЫЕ ОБРАБОТЧИКИ ============
-
-def start(update: Update, context: CallbackContext):
-    """Обработчик команды /start"""
+# ОСНОВНЫЕ ОБРАБОТЧИКИ
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     
     if user.id in ADMINS:
         from bot.admin_keyboards import admin_main_menu
         menu = admin_main_menu()
-        update.message.reply_text("🛠 Добро пожаловать в панель администратора!", reply_markup=menu)
+        await update.message.reply_text("🛠 Добро пожаловать в панель администратора!", reply_markup=menu)
         return
     
     db_user = get_user(user.id)
@@ -137,24 +195,23 @@ def start(update: Update, context: CallbackContext):
         from bot.user_keyboards import user_main_menu
         menu = user_main_menu()
         greeting = f"Привет, {db_user[0]}! 😊"
-        update.message.reply_text(greeting, reply_markup=menu)
+        await update.message.reply_text(greeting, reply_markup=menu)
     else:
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("📱 Отправить контакт", callback_data="request_contact")]
         ])
-        update.message.reply_text(
+        await update.message.reply_text(
             f"Привет! Имя: {user.full_name or 'Клиент'}\n"
             "Пожалуйста, нажмите кнопку ниже, чтобы отправить свой номер.",
             reply_markup=keyboard
         )
 
-def contact_handler(update: Update, context: CallbackContext):
-    """Обработчик контакта"""
+async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     contact = update.message.contact
     user = update.effective_user
     
     if contact.user_id != user.id:
-        update.message.reply_text("Пожалуйста, отправьте свой номер.")
+        await update.message.reply_text("Пожалуйста, отправьте свой номер.")
         return
     
     full_name = user.full_name or "Клиент"
@@ -162,7 +219,7 @@ def contact_handler(update: Update, context: CallbackContext):
     save_user(user.id, full_name, phone_number)
     
     from telegram import ReplyKeyboardRemove
-    update.message.reply_text(
+    await update.message.reply_text(
         "✅ Контакт получен! Теперь вы можете записаться на услугу.",
         reply_markup=ReplyKeyboardRemove()
     )
@@ -176,12 +233,11 @@ def contact_handler(update: Update, context: CallbackContext):
         menu = user_main_menu()
         message = "Выберите действие:"
         
-    update.message.reply_text(message, reply_markup=menu)
+    await update.message.reply_text(message, reply_markup=menu)
 
-def button_handler(update: Update, context: CallbackContext):
-    """Обработчик callback кнопок"""
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    query.answer()
+    await query.answer()
     data = query.data
     user_id = update.effective_user.id
     is_admin = user_id in ADMINS
@@ -195,11 +251,11 @@ def button_handler(update: Update, context: CallbackContext):
             one_time_keyboard=True,
             resize_keyboard=True
         )
-        query.message.reply_text(
+        await query.message.reply_text(
             "Пожалуйста, нажмите кнопку ниже, чтобы поделиться контактом:",
             reply_markup=contact_kb
         )
-        query.message.delete()
+        await query.message.delete()
         return
 
     # Основные команды пользователя
@@ -212,31 +268,31 @@ def button_handler(update: Update, context: CallbackContext):
             from bot.user_keyboards import user_main_menu
             menu = user_main_menu()
             text = "Главное меню:"
-        safe_edit_message(query, text, menu)
+        await safe_edit_message(query, text, menu)
 
     elif data == "my_bookings":
         bookings = get_user_bookings(user_id)
         if not bookings:
             from bot.user_keyboards import user_main_menu
-            safe_edit_message(query, "У вас нет записей.", user_main_menu())
+            await safe_edit_message(query, "У вас нет записей.", user_main_menu())
         else:
             buttons = []
             for b in bookings:
                 text = f"{b[1]} | {b[2]} в {b[3]} — {b[4]}₽"
                 buttons.append([InlineKeyboardButton(text, callback_data=f"view_booking:{b[0]}")])
             buttons.append([InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")])
-            query.edit_message_text("Ваши записи:", reply_markup=InlineKeyboardMarkup(buttons))
+            await query.edit_message_text("Ваши записи:", reply_markup=InlineKeyboardMarkup(buttons))
 
     elif data.startswith("view_booking:"):
         booking_id = int(data.split(":", 1)[1])
         booking = get_booking_by_id_and_user(booking_id, user_id)
         if not booking:
             from bot.user_keyboards import user_main_menu
-            safe_edit_message(query, "Запись не найдена.", user_main_menu())
+            await safe_edit_message(query, "Запись не найдена.", user_main_menu())
             return
         service, date, time, price = booking
         from bot.user_keyboards import booking_detail_menu
-        query.edit_message_text(
+        await query.edit_message_text(
             f"📅 Ваша запись:\nУслуга: {service}\nДата: {date}\nВремя: {time}\nСтоимость: {price}₽",
             reply_markup=booking_detail_menu(booking_id)
         )
@@ -246,26 +302,37 @@ def button_handler(update: Update, context: CallbackContext):
         booking = get_booking_by_id_and_user(booking_id, user_id)
         if not booking:
             from bot.user_keyboards import user_main_menu
-            safe_edit_message(query, "❌ Запись не найдена.", user_main_menu())
+            await safe_edit_message(query, "❌ Запись не найдена.", user_main_menu())
             return
         
         # Получаем данные записи перед удалением
         service, date, time, price = booking
         
+        # Получаем информацию о пользователе
+        user = get_user(user_id)
+        if user:
+            full_name, phone = user
+            user_info = (full_name, phone)
+            booking_details = (service, date, time, price)
+        
         # Удаляем запись
         delete_booking(booking_id)
         
+        # Отправляем уведомление админам об отмене КЛИЕНТОМ
+        if user:
+            await notify_admins_about_cancellation(booking_details, user_info, cancelled_by_admin=False)
+        
         from bot.user_keyboards import user_main_menu
-        safe_edit_message(query, "✅ Запись отменена.", user_main_menu())
+        await safe_edit_message(query, "✅ Запись отменена.", user_main_menu())
 
     elif data == "book":
         services = get_services()
         if not services:
             from bot.user_keyboards import user_main_menu
-            safe_edit_message(query, "Нет доступных услуг.", user_main_menu())
+            await safe_edit_message(query, "Нет доступных услуг.", user_main_menu())
             return
         from bot.user_keyboards import service_menu
-        safe_edit_message(query, "Выберите услугу:", service_menu(services))
+        await safe_edit_message(query, "Выберите услугу:", service_menu(services))
 
     elif data.startswith("select_service:"):
         service = data.split(":", 1)[1]
@@ -277,12 +344,12 @@ def button_handler(update: Update, context: CallbackContext):
                 break
         else:
             from bot.user_keyboards import user_main_menu
-            safe_edit_message(query, "Услуга не найдена.", user_main_menu())
+            await safe_edit_message(query, "Услуга не найдена.", user_main_menu())
             return
         
         today = datetime.today()
         from bot.user_keyboards import generate_user_calendar
-        query.edit_message_text(
+        await query.edit_message_text(
             "📅 *Выберите дату для записи:*\n\n"
             "🟢 — доступные дни\n"
             "❌ — прошедшие дни\n"
@@ -298,7 +365,7 @@ def button_handler(update: Update, context: CallbackContext):
         year = int(parts[1])
         month = int(parts[2])
         from bot.user_keyboards import generate_user_calendar
-        query.edit_message_text(
+        await query.edit_message_text(
             "📅 *Выберите дату для записи:*\n\n"
             "🟢 — доступные дни\n"
             "❌ — прошедшие дни\n"
@@ -315,7 +382,7 @@ def button_handler(update: Update, context: CallbackContext):
         
         if not is_work_day(date):
             from bot.user_keyboards import user_main_menu
-            safe_edit_message(query, "❌ Этот день не доступен для записи.", user_main_menu())
+            await safe_edit_message(query, "❌ Этот день не доступен для записи.", user_main_menu())
             return
             
         context.user_data['date'] = date
@@ -332,11 +399,11 @@ def button_handler(update: Update, context: CallbackContext):
         times = get_available_times(date, duration)
         if not times:
             from bot.user_keyboards import user_main_menu
-            safe_edit_message(query, "📭 Нет свободного времени в этот день.", user_main_menu())
+            await safe_edit_message(query, "📭 Нет свободного времени в этот день.", user_main_menu())
             return
         
         from bot.user_keyboards import time_menu
-        safe_edit_message(
+        await safe_edit_message(
             query,
             f"📅 *Дата: {date}*\n🕐 *Выберите время:*",
             parse_mode='Markdown',
@@ -346,7 +413,7 @@ def button_handler(update: Update, context: CallbackContext):
     elif data == "select_date_back":
         today = datetime.today()
         from bot.user_keyboards import generate_user_calendar
-        query.edit_message_text(
+        await query.edit_message_text(
             "📅 *Выберите дату для записи:*\n\n"
             "🟢 — доступные дни\n"
             "❌ — прошедшие дни\n"
@@ -362,7 +429,7 @@ def button_handler(update: Update, context: CallbackContext):
         price = context.user_data['price']
         
         barber_name = get_barber_name()
-        query.edit_message_text(
+        await query.edit_message_text(
             f"*Подтвердите запись:*\n\n"
             f"👨‍💼 *Мастер:* {barber_name}\n"
             f"💅 *Услуга:* {service}\n"
@@ -380,7 +447,7 @@ def button_handler(update: Update, context: CallbackContext):
         required = ['service', 'date', 'time', 'price', 'duration']
         if not all(k in context.user_data for k in required):
             from bot.user_keyboards import user_main_menu
-            safe_edit_message(query, "Сессия устарела. Начните заново.", user_main_menu())
+            await safe_edit_message(query, "Сессия устарела. Начните заново.", user_main_menu())
             return
         
         service = context.user_data['service']
@@ -391,13 +458,13 @@ def button_handler(update: Update, context: CallbackContext):
         
         if time not in get_available_times(date, duration):
             from bot.user_keyboards import user_main_menu
-            safe_edit_message(query, "К сожалению, это время уже занято. Попробуйте снова.", user_main_menu())
+            await safe_edit_message(query, "К сожалению, это время уже занято. Попробуйте снова.", user_main_menu())
             return
         
         user = get_user(user_id)
         if not user:
             from bot.user_keyboards import user_main_menu
-            safe_edit_message(query, "Ошибка: пользователь не найден.", user_main_menu())
+            await safe_edit_message(query, "Ошибка: пользователь не найден.", user_main_menu())
             return
         
         full_name, phone = user
@@ -405,25 +472,14 @@ def button_handler(update: Update, context: CallbackContext):
         try:
             add_booking(user_id, service, date, time, price)
             
-            # Уведомление админам (упрощенное для 13.15)
-            try:
-                bot_instance = context.bot
-                for admin_id in ADMINS:
-                    message = (
-                        "📢 НОВАЯ ЗАПИСЬ\n"
-                        f"👤 Клиент: {full_name}\n"
-                        f"💅 Услуга: {service}\n"
-                        f"📅 Дата: {date}\n"
-                        f"⏰ Время: {time}\n"
-                        f"💰 Стоимость: {price}₽"
-                    )
-                    bot_instance.send_message(chat_id=admin_id, text=message)
-            except:
-                pass
+            # Отправляем уведомление админам
+            booking_details = (service, date, time, price)
+            user_info = (full_name, phone)
+            await notify_admins_about_booking(booking_details, user_info)
             
             context.user_data.clear()
             from bot.user_keyboards import user_main_menu
-            safe_edit_message(
+            await safe_edit_message(
                 query, 
                 "✅ *Запись успешно подтверждена!*\n\nМы ждем вас в указанное время.", 
                 reply_markup=user_main_menu(),
@@ -432,7 +488,7 @@ def button_handler(update: Update, context: CallbackContext):
         except Exception as e:
             print(f"Ошибка при создании записи: {e}")
             from bot.user_keyboards import user_main_menu
-            safe_edit_message(
+            await safe_edit_message(
                 query, 
                 "❌ Не удалось создать запись. Попробуйте позже.", 
                 reply_markup=user_main_menu()
@@ -442,7 +498,7 @@ def button_handler(update: Update, context: CallbackContext):
     
     elif data == "admin_menu" or (is_admin and data == "back_to_main"):
         from bot.admin_keyboards import admin_main_menu
-        safe_edit_message(query, "🛠 Админ-панель:", reply_markup=admin_main_menu())
+        await safe_edit_message(query, "🛠 Админ-панель:", reply_markup=admin_main_menu())
 
     elif data == "admin_services":
         services = get_services()
@@ -454,7 +510,7 @@ def button_handler(update: Update, context: CallbackContext):
                 text += f"• *{name}* — {price}₽ ({duration} мин)\n"
         
         from bot.admin_keyboards import admin_services_menu
-        query.edit_message_text(
+        await query.edit_message_text(
             text,
             parse_mode='Markdown',
             reply_markup=admin_services_menu()
@@ -462,7 +518,7 @@ def button_handler(update: Update, context: CallbackContext):
 
     elif data == "admin_add_service":
         from bot.admin_keyboards import back_to_admin
-        query.edit_message_text(
+        await query.edit_message_text(
             "Введите данные услуги в формате:\n*Название, цена, длительность (мин)*\nПример: Стрижка, 1500, 60",
             parse_mode='Markdown',
             reply_markup=back_to_admin()
@@ -473,10 +529,10 @@ def button_handler(update: Update, context: CallbackContext):
         services = get_services()
         if not services:
             from bot.admin_keyboards import admin_services_menu
-            safe_edit_message(query, "📭 Нет услуг.", reply_markup=admin_services_menu())
+            await safe_edit_message(query, "📭 Нет услуг.", reply_markup=admin_services_menu())
         else:
             from bot.admin_keyboards import delete_service_menu
-            query.edit_message_text(
+            await query.edit_message_text(
                 "Выберите услугу для удаления:",
                 reply_markup=delete_service_menu(services)
             )
@@ -485,12 +541,12 @@ def button_handler(update: Update, context: CallbackContext):
         service_name = data.split(":", 1)[1]
         delete_service(service_name)
         from bot.admin_keyboards import admin_services_menu
-        safe_edit_message(query, f"✅ Услуга '{service_name}' удалена.", reply_markup=admin_services_menu())
+        await safe_edit_message(query, f"✅ Услуга '{service_name}' удалена.", reply_markup=admin_services_menu())
 
     elif data == "admin_view_calendar":
         today = datetime.today()
         from bot.admin_keyboards import generate_calendar
-        query.edit_message_text(
+        await query.edit_message_text(
             "📅 *Календарь записей:*",
             parse_mode='Markdown',
             reply_markup=generate_calendar(today.year, today.month)
@@ -503,7 +559,7 @@ def button_handler(update: Update, context: CallbackContext):
         year = int(parts[1])
         month = int(parts[2])
         from bot.admin_keyboards import generate_calendar
-        query.edit_message_text(
+        await query.edit_message_text(
             "📅 *Календарь записей:*",
             parse_mode='Markdown',
             reply_markup=generate_calendar(year, month)
@@ -520,6 +576,8 @@ def button_handler(update: Update, context: CallbackContext):
                 ORDER BY b.time
             """, (date,)).fetchall()
         
+        keyboard_buttons = []
+        
         if not bookings:
             text = f"📅 *{date}*\n\n📭 Нет записей на эту дату."
         else:
@@ -529,23 +587,82 @@ def button_handler(update: Update, context: CallbackContext):
                 text += f"  📞 Телефон: `{b[6] or 'Нет'}`\n"
                 text += f"  🆔 ID записи: `{b[0]}`\n"
                 text += "  ――――――――――――――――――\n"
+                
+                # Добавляем кнопку для отмены записи
+                keyboard_buttons.append([
+                    InlineKeyboardButton(
+                        f"❌ Отменить запись #{b[0]}", 
+                        callback_data=f"admin_cancel_booking:{b[0]}"
+                    )
+                ])
         
-        query.edit_message_text(
+        # Добавляем кнопки навигации
+        keyboard_buttons.append([
+            InlineKeyboardButton("⬅️ Назад к календарю", callback_data="admin_view_calendar")
+        ])
+        keyboard_buttons.append([
+            InlineKeyboardButton("⬅️ В меню", callback_data="admin_menu")
+        ])
+        
+        await query.edit_message_text(
             text,
             parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⬅️ Назад к календарю", callback_data="admin_view_calendar")],
-                [InlineKeyboardButton("⬅️ В меню", callback_data="admin_menu")]
-            ])
+            reply_markup=InlineKeyboardMarkup(keyboard_buttons)
         )
+
+    elif data.startswith("admin_cancel_booking:"):
+        if user_id not in ADMINS:
+            from bot.user_keyboards import user_main_menu
+            await safe_edit_message(query, "🚫 Доступ запрещён.", user_main_menu())
+            return
+            
+        booking_id = int(data.split(":", 1)[1])
+        
+        booking = get_booking_by_id(booking_id)
+        if not booking:
+            from bot.admin_keyboards import admin_main_menu
+            await safe_edit_message(query, "❌ Запись не найдена.", admin_main_menu())
+            return
+        
+        booking_id, booking_user_id, service, date, time, price = booking
+        
+        user = get_user_by_id(booking_user_id)
+        user_info = None
+        booking_details = None
+        
+        if user:
+            full_name, phone = user
+            user_info = (full_name, phone)
+            booking_details = (service, date, time, price)
+        
+        delete_booking(booking_id)
+        
+        if user_info and booking_details:
+            await notify_admins_about_cancellation(booking_details, user_info, cancelled_by_admin=True)
+        
+        if user_info:
+            from bot.admin_keyboards import admin_main_menu
+            await safe_edit_message(
+                query, 
+                f"✅ Запись #{booking_id} ({service} на {date} в {time}) отменена.\n"
+                f"Клиент: {user_info[0]}", 
+                admin_main_menu()
+            )
+        else:
+            from bot.admin_keyboards import admin_main_menu
+            await safe_edit_message(
+                query, 
+                f"✅ Запись #{booking_id} отменена.", 
+                admin_main_menu()
+            )
 
     elif data == "admin_close_slots":
         from bot.admin_keyboards import admin_close_slots_menu
-        safe_edit_message(query, "🚫 *Закрытие времени:*", parse_mode='Markdown', reply_markup=admin_close_slots_menu())
+        await safe_edit_message(query, "🚫 *Закрытие времени:*", parse_mode='Markdown', reply_markup=admin_close_slots_menu())
 
     elif data == "close_day":
         from bot.admin_keyboards import date_picker
-        safe_edit_message(query, 
+        await safe_edit_message(query, 
             "📅 *Выберите день для закрытия:*\n\n🚫 — понедельники (уже закрыты)", 
             parse_mode='Markdown', 
             reply_markup=date_picker()
@@ -554,7 +671,7 @@ def button_handler(update: Update, context: CallbackContext):
 
     elif data == "close_time":
         from bot.admin_keyboards import date_picker
-        query.edit_message_text(
+        await query.edit_message_text(
             "Выберите дату для закрытия времени:",
             reply_markup=date_picker()
         )
@@ -566,15 +683,15 @@ def button_handler(update: Update, context: CallbackContext):
         if context.user_data.get('close_mode') == 'day':
             close_day(date)
             from bot.admin_keyboards import admin_close_slots_menu
-            safe_edit_message(query, f"✅ День *{date}* закрыт.", 
-                           parse_mode='Markdown', 
-                           reply_markup=admin_close_slots_menu())
+            await safe_edit_message(query, f"✅ День *{date}* закрыт.", 
+                                   parse_mode='Markdown', 
+                                   reply_markup=admin_close_slots_menu())
             context.user_data.pop('close_mode', None)
             
         elif context.user_data.get('close_mode') == 'time':
             context.user_data['close_time_date'] = date
             from bot.admin_keyboards import time_picker
-            safe_edit_message(query, 
+            await safe_edit_message(query, 
                 f"*Дата:* {date}\nВыберите время для закрытия:", 
                 parse_mode='Markdown', 
                 reply_markup=time_picker()
@@ -588,7 +705,7 @@ def button_handler(update: Update, context: CallbackContext):
             context.user_data.pop('close_time_date', None)
             context.user_data.pop('close_mode', None)
             from bot.admin_keyboards import admin_close_slots_menu
-            safe_edit_message(query, 
+            await safe_edit_message(query, 
                 f"✅ Время *{time}* в *{date}* закрыто.", 
                 parse_mode='Markdown', 
                 reply_markup=admin_close_slots_menu()
@@ -598,11 +715,11 @@ def button_handler(update: Update, context: CallbackContext):
         closed = get_closed_slots()
         if not closed:
             from bot.admin_keyboards import admin_close_slots_menu
-            safe_edit_message(query, "📭 Нет закрытых дней или времени.", parse_mode='Markdown', reply_markup=admin_close_slots_menu())
+            await safe_edit_message(query, "📭 Нет закрытых дней или времени.", parse_mode='Markdown', reply_markup=admin_close_slots_menu())
             return
         
         from bot.admin_keyboards import open_slots_menu
-        query.edit_message_text(
+        await query.edit_message_text(
             "Выберите слот для открытия:",
             reply_markup=open_slots_menu(closed)
         )
@@ -618,7 +735,7 @@ def button_handler(update: Update, context: CallbackContext):
         if time_or_all == "all":
             open_day(date)
             from bot.admin_keyboards import admin_close_slots_menu
-            safe_edit_message(
+            await safe_edit_message(
                 query, 
                 f"✅ День *{date}* открыт.", 
                 parse_mode='Markdown', 
@@ -628,7 +745,7 @@ def button_handler(update: Update, context: CallbackContext):
             time = time_or_all
             open_time(date, time)
             from bot.admin_keyboards import admin_close_slots_menu
-            safe_edit_message(
+            await safe_edit_message(
                 query, 
                 f"✅ Время *{time}* в *{date}* открыто.", 
                 parse_mode='Markdown', 
@@ -638,7 +755,7 @@ def button_handler(update: Update, context: CallbackContext):
     elif data == "admin_working_hours":
         start, end = get_working_hours()
         from bot.admin_keyboards import admin_working_hours_menu
-        safe_edit_message(
+        await safe_edit_message(
             query,
             f"🕒 *Текущее время работы:*\n*С {start} до {end}*\n\n*Выходной:* Понедельник",
             parse_mode='Markdown',
@@ -647,7 +764,7 @@ def button_handler(update: Update, context: CallbackContext):
 
     elif data == "edit_working_hours":
         from bot.admin_keyboards import back_to_admin
-        query.edit_message_text(
+        await query.edit_message_text(
             "Введите новое время работы в формате:\n*Начало, Конец*\nПример: 09:00, 19:00",
             parse_mode='Markdown',
             reply_markup=back_to_admin()
@@ -661,19 +778,17 @@ def button_handler(update: Update, context: CallbackContext):
         else:
             from bot.user_keyboards import user_main_menu
             menu = user_main_menu()
-        safe_edit_message(query, "Неизвестная команда.", menu)
+        await safe_edit_message(query, "Неизвестная команда.", menu)
 
-def admin_command(update: Update, context: CallbackContext):
-    """Обработчик команды /admin"""
+async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMINS:
-        update.message.reply_text("🚫 Доступ запрещён.")
+        await update.message.reply_text("🚫 Доступ запрещён.")
         return
     
     from bot.admin_keyboards import admin_main_menu
-    update.message.reply_text("🛠 Админ-панель:", reply_markup=admin_main_menu())
+    await update.message.reply_text("🛠 Админ-панель:", reply_markup=admin_main_menu())
 
-def text_handler(update: Update, context: CallbackContext):
-    """Обработчик текстовых сообщений"""
+async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id not in ADMINS:
         return
@@ -691,10 +806,10 @@ def text_handler(update: Update, context: CallbackContext):
             duration = int(parts[2].strip())
             add_service(name, price, duration)
             from bot.admin_keyboards import admin_services_menu
-            update.message.reply_text(f"✅ Услуга '{name}' добавлена.", reply_markup=admin_services_menu())
+            await update.message.reply_text(f"✅ Услуга '{name}' добавлена.", reply_markup=admin_services_menu())
         except:
             from bot.admin_keyboards import back_to_admin
-            update.message.reply_text("❌ Формат: Название, цена, длительность", reply_markup=back_to_admin())
+            await update.message.reply_text("❌ Формат: Название, цена, длительность", reply_markup=back_to_admin())
         context.user_data['awaiting'] = None
 
     elif state == 'set_working_hours':
@@ -710,16 +825,16 @@ def text_handler(update: Update, context: CallbackContext):
                 raise ValueError
             set_working_hours(start, end)
             from bot.admin_keyboards import admin_working_hours_menu
-            update.message.reply_text(
+            await update.message.reply_text(
                 f"✅ Время работы установлено: {start}–{end}",
                 reply_markup=admin_working_hours_menu()
             )
         except Exception as e:
             print("Ошибка при установке времени:", e)
             from bot.admin_keyboards import back_to_admin
-            update.message.reply_text("❌ Формат: 09:00, 19:00", reply_markup=back_to_admin())
+            await update.message.reply_text("❌ Формат: 09:00, 19:00", reply_markup=back_to_admin())
         context.user_data['awaiting'] = None
 
     else:
         from bot.admin_keyboards import admin_main_menu
-        update.message.reply_text("Неизвестная команда.", reply_markup=admin_main_menu())
+        await update.message.reply_text("Неизвестная команда.", reply_markup=admin_main_menu())
