@@ -1,4 +1,4 @@
-# main.py - ПОЛНЫЙ КОД
+# main.py - ОБНОВЛЕННЫЙ КОД ДЛЯ python-telegram-bot==20.7
 import os
 import sys
 import logging
@@ -16,7 +16,7 @@ def main():
     try:
         print("=" * 60)
         print("🚀 ТЕЛЕГРАМ БОТ ДЛЯ БАРБЕРШОПА")
-        print("Версия: 13.15 (стабильная)")
+        print("Версия: 20.7 (современная)")
         print("=" * 60)
         
         # 1. Проверка конфига
@@ -42,30 +42,31 @@ def main():
             logger.error(f"❌ Ошибка базы данных: {e}")
             return
         
-        # 3. Создание Updater (версия 13.15)
+        # 3. Создание Application (версия 20.7)
         try:
-            from telegram import Updater
-            from telegram.ext import CommandHandler, CallbackQueryHandler, MessageHandler, Filters
+            from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
             
-            updater = Updater(token=BOT_TOKEN, use_context=True)
-            dp = updater.dispatcher
+            application = Application.builder().token(BOT_TOKEN).build()
             
-            logger.info("✅ Updater создан")
+            logger.info("✅ Application создан")
             
         except Exception as e:
-            logger.error(f"❌ Ошибка создания Updater: {e}")
+            logger.error(f"❌ Ошибка создания Application: {e}")
             return
         
         # 4. Импорт обработчиков
         try:
-            from bot.handlers import start, admin_command, contact_handler, button_handler, text_handler
+            from bot.handlers import start, admin_command, contact_handler, button_handler, text_handler, set_application
             
-            # Добавление обработчиков (версия 13.15)
-            dp.add_handler(CommandHandler("start", start))
-            dp.add_handler(CommandHandler("admin", admin_command))
-            dp.add_handler(MessageHandler(Filters.contact, contact_handler))
-            dp.add_handler(MessageHandler(Filters.text & Filters.private, text_handler))
-            dp.add_handler(CallbackQueryHandler(button_handler))
+            # Установим application для уведомлений
+            set_application(application)
+            
+            # Добавление обработчиков (версия 20.7)
+            application.add_handler(CommandHandler("start", start))
+            application.add_handler(CommandHandler("admin", admin_command))
+            application.add_handler(MessageHandler(filters.CONTACT, contact_handler))
+            application.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE, text_handler))
+            application.add_handler(CallbackQueryHandler(button_handler))
             
             logger.info("✅ Все обработчики добавлены")
             
@@ -86,8 +87,7 @@ def main():
         logger.info("✅ Закрытие/открытие времени")
         logger.info("=" * 60)
         
-        updater.start_polling()
-        updater.idle()
+        application.run_polling(allowed_updates=Update.ALL_TYPES)
         
     except Exception as e:
         logger.error(f"💥 КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
