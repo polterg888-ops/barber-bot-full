@@ -1,4 +1,4 @@
-# main.py - ИСПРАВЛЕННЫЙ
+# main.py - РАБОЧИЙ КОД ДЛЯ ВЕРСИИ 13.15
 import os
 import sys
 import logging
@@ -15,7 +15,7 @@ def main():
     """Основная функция запуска"""
     try:
         print("=" * 60)
-        print("🚀 ТЕЛЕГРАМ БОТ ДЛЯ БАРБЕРШОПА - ПОЛНАЯ ВЕРСИЯ")
+        print("🚀 ТЕЛЕГРАМ БОТ ДЛЯ БАРБЕРШОПА")
         print("=" * 60)
         
         # 1. Проверка конфига
@@ -41,66 +41,45 @@ def main():
             logger.error(f"❌ Ошибка базы данных: {e}")
             return
         
-        # 3. Создание приложения бота
+        # 3. Создание Updater (версия 13.15)
         try:
-            from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
+            from telegram import Updater
+            from telegram.ext import CommandHandler, CallbackQueryHandler, MessageHandler, Filters
             
-            app = Application.builder().token(BOT_TOKEN).build()
-            logger.info("✅ Приложение бота создано")
+            updater = Updater(token=BOT_TOKEN, use_context=True)
+            dp = updater.dispatcher
+            
+            logger.info("✅ Updater создан")
             
         except Exception as e:
-            logger.error(f"❌ Ошибка создания приложения: {e}")
+            logger.error(f"❌ Ошибка создания Updater: {e}")
             return
         
-        # 4. Импорт обработчиков (важно: ПОСЛЕ создания приложения)
+        # 4. Импорт обработчиков (важно!)
         try:
-            # Импортируем основные функции
-            from bot.handlers import start, admin_command, contact_handler, button_handler, text_handler
+            from bot.handlers_13 import start, admin_command, contact_handler, button_handler, text_handler
             
-            # Импортируем set_application отдельно
-            from bot.handlers import set_application
-            set_application(app)
+            # Добавление обработчиков (версия 13.15)
+            dp.add_handler(CommandHandler("start", start))
+            dp.add_handler(CommandHandler("admin", admin_command))
+            dp.add_handler(MessageHandler(Filters.contact, contact_handler))
+            dp.add_handler(MessageHandler(Filters.text & Filters.private, text_handler))
+            dp.add_handler(CallbackQueryHandler(button_handler))
             
-            logger.info("✅ Обработчики загружены")
+            logger.info("✅ Обработчики добавлены")
             
         except ImportError as e:
-            logger.error(f"❌ Ошибка загрузки обработчиков: {e}")
-            logger.error("Проверьте папку bot/:")
-            logger.error("1. __init__.py (пустой файл)")
-            logger.error("2. handlers.py")
-            logger.error("3. admin_keyboards.py")
-            logger.error("4. user_keyboards.py")
+            logger.error(f"❌ Ошибка импорта обработчиков: {e}")
+            logger.error("Создайте файл bot/handlers_13.py")
             return
         
-        # 5. Добавление обработчиков
-        try:
-            app.add_handler(CommandHandler("start", start))
-            app.add_handler(CommandHandler("admin", admin_command))
-            app.add_handler(MessageHandler(filters.CONTACT, contact_handler))
-            app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE, text_handler))
-            app.add_handler(CallbackQueryHandler(button_handler))
-            
-            logger.info("✅ Все обработчики добавлены")
-            
-        except Exception as e:
-            logger.error(f"❌ Ошибка добавления обработчиков: {e}")
-            return
-        
-        # 6. Запуск бота
+        # 5. Запуск бота
         logger.info("=" * 60)
-        logger.info("🤖 БОТ ЗАПУЩЕН СО ВСЕМИ ФУНКЦИЯМИ:")
-        logger.info("✅ Запись на услуги")
-        logger.info("✅ Календарь записей")
-        logger.info("✅ Управление услугами")
-        logger.info("✅ Уведомления админам")
-        logger.info("✅ Закрытие/открытие времени")
-        logger.info("✅ Работа с пользователями")
+        logger.info("🤖 БОТ ЗАПУЩЕН И ГОТОВ К РАБОТЕ!")
         logger.info("=" * 60)
         
-        app.run_polling(
-            drop_pending_updates=True,
-            allowed_updates=["message", "callback_query"]
-        )
+        updater.start_polling()
+        updater.idle()
         
     except Exception as e:
         logger.error(f"💥 КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
