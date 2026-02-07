@@ -1,4 +1,4 @@
-# main.py - РАБОЧИЙ КОД ДЛЯ ВЕРСИИ 13.15
+# main.py - ПОЛНЫЙ КОД
 import os
 import sys
 import logging
@@ -16,6 +16,7 @@ def main():
     try:
         print("=" * 60)
         print("🚀 ТЕЛЕГРАМ БОТ ДЛЯ БАРБЕРШОПА")
+        print("Версия: 13.15 (стабильная)")
         print("=" * 60)
         
         # 1. Проверка конфига
@@ -55,9 +56,9 @@ def main():
             logger.error(f"❌ Ошибка создания Updater: {e}")
             return
         
-        # 4. Импорт обработчиков (важно!)
+        # 4. Импорт обработчиков
         try:
-            from bot.handlers_13 import start, admin_command, contact_handler, button_handler, text_handler
+            from bot.handlers import start, admin_command, contact_handler, button_handler, text_handler
             
             # Добавление обработчиков (версия 13.15)
             dp.add_handler(CommandHandler("start", start))
@@ -66,16 +67,23 @@ def main():
             dp.add_handler(MessageHandler(Filters.text & Filters.private, text_handler))
             dp.add_handler(CallbackQueryHandler(button_handler))
             
-            logger.info("✅ Обработчики добавлены")
+            logger.info("✅ Все обработчики добавлены")
             
         except ImportError as e:
             logger.error(f"❌ Ошибка импорта обработчиков: {e}")
-            logger.error("Создайте файл bot/handlers_13.py")
+            logger.error("Проверьте файлы в папке bot/:")
+            logger.error("1. __init__.py (пустой файл)")
+            logger.error("2. handlers.py")
             return
         
         # 5. Запуск бота
         logger.info("=" * 60)
-        logger.info("🤖 БОТ ЗАПУЩЕН И ГОТОВ К РАБОТЕ!")
+        logger.info("🤖 БОТ ЗАПУЩЕН СО ВСЕМИ ФУНКЦИЯМИ:")
+        logger.info("✅ Запись на услуги")
+        logger.info("✅ Календарь записей")
+        logger.info("✅ Управление услугами")
+        logger.info("✅ Уведомления админам")
+        logger.info("✅ Закрытие/открытие времени")
         logger.info("=" * 60)
         
         updater.start_polling()
