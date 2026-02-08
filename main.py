@@ -1,124 +1,132 @@
-# main.py - УНИВЕРСАЛЬНЫЙ ДЛЯ ЛЮБОЙ ВЕРСИИ
-import sys
 import os
-
-# Фиксы для модулей
-class MockImghdr:
-    @staticmethod
-    def what(file, h=None):
-        return None
-
-class FakeDotenv:
-    @staticmethod
-    def load_dotenv():
-        pass
-
-sys.modules['imghdr'] = MockImghdr()
-sys.modules['dotenv'] = FakeDotenv()
-
 import logging
+import asyncio
+from datetime import datetime
 
+# Настройка логирования
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-def main():
+# Проверка наличия токена
+BOT_TOKEN = os.environ.get('BOT_TOKEN')
+if not BOT_TOKEN:
+    logger.error("❌ ОШИБКА: Не найден BOT_TOKEN в переменных окружения!")
+    logger.error("Добавьте BOT_TOKEN в настройках Render: Settings -> Environment")
+    exit(1)
+
+# Проверяем версию Python
+import sys
+print(f"Python версия: {sys.version}")
+print(f"Токен: {'установлен' if BOT_TOKEN else 'НЕТ!'}")
+
+# Импортируем модули
+from database import init_db, check_and_fix_db
+from bot.handlers import set_bot
+
+async def main():
+    """Основная функция запуска бота"""
     try:
         print("=" * 60)
         print("🚀 ТЕЛЕГРАМ БОТ ДЛЯ БАРБЕРШОПА")
         print("=" * 60)
         
-        # 1. Определяем версию
-        logger.info("🔍 Определяем версию python-telegram-bot...")
-        try:
-            import pkg_resources
-            ptb_version = pkg_resources.get_distribution("python-telegram-bot").version
-            logger.info(f"📦 Версия: {ptb_version}")
-            
-            if ptb_version.startswith("13."):
-                VERSION_13 = True
-                logger.info("⚙️ Определено: версия 13.x")
-            elif ptb_version.startswith("20."):
-                VERSION_13 = False
-                logger.info("⚙️ Определено: версия 20.x")
-            else:
-                logger.warning(f"⚠️ Неизвестная версия: {ptb_version}")
-                # Предполагаем версию 20.x как современную
-                VERSION_13 = False
-        except:
-            logger.warning("⚠️ Не удалось определить версию, предполагаем 20.x")
-            VERSION_13 = False
-        
-        # 2. Загружаем config
-        from config import BOT_TOKEN, ADMINS
-        logger.info(f"✅ Токен: {'установлен' if BOT_TOKEN else 'НЕТ!'}")
-        
-        if not BOT_TOKEN:
-            logger.error("❌ BOT_TOKEN не установлен!")
-            return
-        
-        # 3. Инициализация базы
-        from database import init_db
+        # Инициализация базы данных
+        print("🔧 Инициализируем базу данных...")
         init_db()
-        logger.info("✅ База данных инициализирована")
+        check_and_fix_db()
+        print("✅ База данных готова")
         
-        # 4. Импортируем обработчики
-        from bot.handlers import start, admin_command, contact_handler, button_handler, text_handler
+        # Создаем Application
+        print("🤖 Создаем Application...")
         
-        if VERSION_13:
-            # ========== ВЕРСИЯ 13.15 ==========
-            logger.info("🤖 Создаем Updater (версия 13.x)...")
-            from telegram import Updater
-            from telegram.ext import CommandHandler, CallbackQueryHandler, MessageHandler, Filters
-            
-            updater = Updater(token=BOT_TOKEN, use_context=True)
-            dp = updater.dispatcher
-            
-            # Передаем updater для уведомлений
-            set_application(updater)
-            
-            # Добавляем обработчики
-            dp.add_handler(CommandHandler("start", start))
-            dp.add_handler(CommandHandler("admin", admin_command))
-            dp.add_handler(MessageHandler(Filters.contact, contact_handler))
-            dp.add_handler(MessageHandler(Filters.text & Filters.private, text_handler))
-            dp.add_handler(CallbackQueryHandler(button_handler))
-            
-            logger.info("✅ Все обработчики добавлены")
-            logger.info("▶️ Запускаем бота (версия 13.x)...")
-            
-            updater.start_polling()
-            updater.idle()
-            
-        else:
-            # ========== ВЕРСИЯ 20.7+ ==========
-            logger.info("🤖 Создаем Application (версия 20.x)...")
-            from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
-            
+        try:
+            # Способ 1: Для версий 20.x+
+            from telegram.ext import Application
             application = Application.builder().token(BOT_TOKEN).build()
+            print("✅ Application создан через builder()")
             
-            # Передаем application для уведомлений
-            set_application(application)
+        except Exception as e:
+            print(f"⚠️ Способ 1 не сработал: {e}")
             
-            # Добавляем обработчики
-            application.add_handler(CommandHandler("start", start))
-            application.add_handler(CommandHandler("admin", admin_command))
-            application.add_handler(MessageHandler(filters.CONTACT, contact_handler))
-            application.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE, text_handler))
-            application.add_handler(CallbackQueryHandler(button_handler))
-            
-            logger.info("✅ Все обработчики добавлены")
-            logger.info("▶️ Запускаем бота (версия 20.x)...")
-            
-            application.run_polling(drop_pending_updates=True)
+            try:
+                # Способ 2: Для старых версий 13.x-20.x
+                from telegram.ext import Updater
+                updater = Updater(token=BOT_TOKEN, use_context=True)
+                application = updater.application
+                print("✅ Application создан через Updater")
+                
+            except Exception as e2:
+                print(f"❌ Способ 2 не сработал: {e2}")
+                raise Exception("Не удалось создать Application!")
         
+        # Регистрация обработчиков
+        print("📝 Регистрируем обработчики...")
+        
+        from bot.handlers import (
+            start, 
+            admin_command, 
+            contact_handler, 
+            button_handler, 
+            text_handler
+        )
+        
+        # Команды
+        application.add_handler(telegram.ext.CommandHandler("start", start))
+        application.add_handler(telegram.ext.CommandHandler("admin", admin_command))
+        
+        # Контакт
+        application.add_handler(telegram.ext.MessageHandler(
+            telegram.ext.filters.CONTACT, 
+            contact_handler
+        ))
+        
+        # Callback кнопки
+        application.add_handler(telegram.ext.CallbackQueryHandler(button_handler))
+        
+        # Текстовые сообщения
+        application.add_handler(telegram.ext.MessageHandler(
+            telegram.ext.filters.TEXT & ~telegram.ext.filters.COMMAND, 
+            text_handler
+        ))
+        
+        # Устанавливаем бота для уведомлений
+        set_bot(application.bot)
+        
+        print("✅ Все обработчики зарегистрированы")
+        print("🤖 Бот запускается...")
+        
+        # Запуск бота
+        await application.initialize()
+        await application.start()
+        await application.updater.start_polling()
+        
+        print("=" * 60)
+        print("✅ Бот успешно запущен и готов к работе!")
+        print("=" * 60)
+        
+        # Бесконечный цикл
+        while True:
+            await asyncio.sleep(3600)
+            
     except Exception as e:
-        logger.error(f"💥 КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
+        print(f"💥 КРИТИЧЕСКАЯ ОШИБКА: {e}")
         import traceback
-        logger.error(traceback.format_exc())
-        sys.exit(1)
+        traceback.print_exc()
+        raise
 
 if __name__ == '__main__':
-    main()
+    # Проверяем наличие необходимых импортов
+    try:
+        import telegram
+        from telegram.ext import Application, Updater, CommandHandler, MessageHandler, CallbackQueryHandler, filters
+        print(f"✅ Версия python-telegram-bot: {telegram.__version__}")
+    except ImportError as e:
+        print(f"❌ Ошибка импорта: {e}")
+        print("Установите библиотеку: pip install python-telegram-bot==20.7")
+        exit(1)
+    
+    # Запуск
+    asyncio.run(main())
